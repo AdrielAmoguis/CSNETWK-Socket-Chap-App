@@ -9,7 +9,6 @@ from pyclbr import Function
 import socket as sock
 import json
 import os
-from dotenv import load_dotenv
 from threading import Thread, active_count
 from datetime import datetime
 import sys
@@ -131,12 +130,9 @@ def main():
 
     signal.signal(signal.SIGINT, signal_handler)
 
-    print("Loading environment variables")
-    load_dotenv()
-
     Thread(target=inputGrabber).start()
 
-    serverInstance = ChatServer(os.getenv("HOST_ADDRESS"), os.getenv("LISTEN_PORT"))
+    serverInstance = ChatServer(sys.argv[0], sys.argv[1])
     serverInstance.start(callback=lambda host, port: print("Server started on {}:{}".format(host, port)))
 
 
