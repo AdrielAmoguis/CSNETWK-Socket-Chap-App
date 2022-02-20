@@ -4,102 +4,139 @@
 #   - Lorenzo S. Querol
 
 # Import Dependencies
+from http import server
+from pyclbr import Function
 import socket as sock
 import json
 import os
 from dotenv import load_dotenv
-from threading import Thread
+from threading import Thread, active_count
+from datetime import datetime
+import sys
+import signal
 
 class ChatServer:
-    def __init__(self, hostAddress, listenPort, bufferSize = 1024):
-        # Instance Variables
-        self.hostAddress = hostAddress
-        self.listenPort = listenPort
+    def __init__(self, hostAddress: str, listenPort: int, bufferSize: int = 1024):
+        self.hostAddress = str(hostAddress)
+        self.listenPort = int(listenPort)
+        self.bufferSize = int(bufferSize)
+        self.listenerThread = Thread(target = self.listener)
+        self.runThread = True
         self.clients = {}
-        self.connectionHandlerThread = None
-        self.bufferSize = bufferSize
 
-        # Set the host and port tuple
-        connection = (str(hostAddress), int(listenPort))
+        # Initialize Socket
+        self.server = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
+        self.server.bind((self.hostAddress, self.listenPort))
 
-        # Get the TCP Socket Object
-        server = sock.socket(sock.AF_INET, sock.SOCK_STREAM)
-
-        # Bind the server
-        server.bind(connection)
-
-        # Set the server
-        self.server = server
-    
-    def start(self, maxConnections = 10, callback = None):
-        self.server.listen(maxConnections)
-        print("Server started on {}:{}".format(self.hostAddress, self.listenPort))
-        self.connectionHandlerThread = Thread(target=self.connectionLoop, args=(self,))
-
+    def start(self, callback: Function = None):
         try:
-            # Start connection loop
-            self.connectionHandlerThread.start()
-
-            # Execute the callback function
-            if callback:
-                callback()
-
-            # Join the connection handler thread
-            self.connectionHandlerThread.join()
-
-        except Exception as ex:
-            print("Error occured while running server!")
-            print(ex)
+            self.listenerThread.start()
+            if callback: callback(self.hostAddress, self.listenPort)
+            self.listenerThread.join()
+        except Exception as err:
+            print("Error occured: {}".format(err))
+            err.with_traceback()
         finally:
-            # Close the server
-            self.server.close()
-            print("Server closed!")
+            if self.server: self.server.close()
 
+    def listener(self):
+        while self.runThread:
+            # Receive messages
+            try:
+                data, client = self.server.recvfrom(self.bufferSize)
+                print("Connection Received from {}".format(client))
+                parsed = data.decode('utf-8')
+                parsedJSON = json.loads(parsed)
+                self.messageHandler(client, parsedJSON)
+            except Exception as ex:
+                print("Error occured when received connection: {}".format(ex))
+                ex.with_traceback(None)
+                continue
 
-    def connectionLoop(self):
-        while True:
-            # Accept the connection
-            client, clientAddress = self.server.accept()
-
-            # Acknowledge the connection
-            client.send(bytes("Welcome to the CSNETWK Chat Server!", "utf-8"))
-
-            # Add connection to connection pool
-            self.clients[client] = clientAddress
-
-    def clientHandler(self, client):
-        # Wait for client messages
-        while True:
-            # Parse message
-            clientMessage = client.recv(self.bufferSize)
-            
-            # Handle Message
-            self.commandHandler(client, clientMessage)
-
-    def commandHandler(self, client, command):
-        # Parse json
-        parsedJSON = json.loads(command.decode("utf-8"))
-
-        # Command Switch
-        if parsedJSON["command"] == "register":
-            pass
-        elif parsedJSON["command"] == "deregister":
-            pass
+    def messageHandler(self, client, commandObject: dict):
+        # Check the command
+        command = commandObject['command']
+        if command == 'register':
+            self.register(client, commandObject['username'])
+        elif command == 'deregister':
+            self.unregister(client, commandObject['username'])
+        elif command == 'msg':
+            self.broadcast(commandObject["username"], commandObject["message"])
+        elif command == 'list':
+            self.server.sendto(bytes(json.dumps({'command':'msg', 'username': 'Server', 'message': self.getUserListString()}), 'utf-8'), client)
         else:
-            pass
+            self.server.sendto(bytes(json.dumps({'command': 'ret_code','code_no': 301}), 'utf-8'), client)
 
-    def broadcastHandler(self, message):
-        # Broadcast the message to all clients
-        for client in self.clients:
-            client.send(bytes(message, "utf-8"))
+    def register(self, client, username: str):
+        if username == None:
+            self.server.sendto(bytes(json.dumps({'command': 'ret_code','code_no': 201}), 'utf-8'), client)
+            return
+        elif username in self.clients.keys():
+            self.server.sendto(bytes(json.dumps({'command': 'ret_code', 'code_no': 502}), 'utf-8'), client)
+            return
+        else:
+            self.clients[username] = client
+            self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 401}), 'utf-8'), client)
+            self.broadcast("Server", "{} has joined the chat".format(username))
+            self.broadcast("Server", self.getUserListString())
+            return
 
+    def unregister(self, client, username: str):
+        if username in self.clients.keys():
+            del self.clients[username]
+            self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 401}), 'utf-8'), client)
+            self.broadcast("Server", "{} has left the chat".format(username))
+            self.broadcast("Server", self.getUserListString())
+        else:
+            self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 501}), 'utf-8'), client)
+
+    def broadcast(self, sender: str, message: str):
+        stamp = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+        sendMessage = f'[{stamp}] {sender}: {message}'
+        for username in self.clients:
+            self.server.sendto(bytes(json.dumps({'command':'msg', 'username': sender, 'message': sendMessage}), 'utf-8'), self.clients[username])
+
+    def getUserListString(self):
+        userList = f'{len(self.clients.keys())} users online: [ '
+        userList += ", ".join(self.clients.keys())
+        userList += " ]"
+        return userList
+
+    def stop(self):
+        self.runThread = False
+        self.server.close()
+
+serverInstance: ChatServer = None
+
+def signal_handler(signal, frame):
+    global serverInstance
+    print("\nKeyboardInterrupt Signal Detected. Shutting down.")
+    serverInstance.stop()
+    sys.exit(0)
+
+def inputGrabber():
+    global serverInstance
+    while True:
+        i = input()
+        if i == "stop":
+            serverInstance.stop()
+            break
+        elif i == "users" or i == "list":
+            print(serverInstance.getUserListString())
 
 def main():
+    global serverInstance
+
+    signal.signal(signal.SIGINT, signal_handler)
+
     print("Loading environment variables")
     load_dotenv()
 
+    Thread(target=inputGrabber).start()
+
     serverInstance = ChatServer(os.getenv("HOST_ADDRESS"), os.getenv("LISTEN_PORT"))
-    serverInstance.start(callback=serverInstance.clientHandler)
+    serverInstance.start(callback=lambda host, port: print("Server started on {}:{}".format(host, port)))
+
 
 if __name__ == "__main__":
     main()
