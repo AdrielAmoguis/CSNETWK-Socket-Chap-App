@@ -4,8 +4,7 @@
 #   - Lorenzo S. Querol
 
 # Import Dependencies
-from http import server
-from pyclbr import Function
+from distutils import command
 import socket as sock
 import json
 import os
@@ -27,7 +26,7 @@ class ChatServer:
         self.server = sock.socket(sock.AF_INET, sock.SOCK_DGRAM)
         self.server.bind((self.hostAddress, self.listenPort))
 
-    def start(self, callback: Function = None):
+    def start(self, callback = None):
         try:
             self.listenerThread.start()
             if callback: callback(self.hostAddress, self.listenPort)
@@ -43,7 +42,6 @@ class ChatServer:
             # Receive messages
             try:
                 data, client = self.server.recvfrom(self.bufferSize)
-                print("Connection Received from {}".format(client))
                 parsed = data.decode('utf-8')
                 parsedJSON = json.loads(parsed)
                 self.messageHandler(client, parsedJSON)
@@ -57,14 +55,37 @@ class ChatServer:
         command = commandObject['command']
         if command == 'register':
             self.register(client, commandObject['username'])
-        elif command == 'deregister':
+
+        # Check if registered
+        if not self.checkRegistered(commandObject['username']):
+            self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 501}), 'utf-8'), client)
+            return
+
+        if command == 'deregister':
             self.unregister(client, commandObject['username'])
         elif command == 'msg':
-            self.broadcast(commandObject["username"], commandObject["message"])
+            self.handleMsg(client, commandObject)
+            #self.broadcast(commandObject["username"], commandObject["message"])
         elif command == 'list':
             self.server.sendto(bytes(json.dumps({'command':'msg', 'username': 'Server', 'message': self.getUserListString()}), 'utf-8'), client)
         else:
             self.server.sendto(bytes(json.dumps({'command': 'ret_code','code_no': 301}), 'utf-8'), client)
+
+    def checkRegistered(self, username: str):
+        if username in self.clients.keys():
+            return True
+        else:
+            return False
+
+    def handleMsg(self, client, commandObject: dict):
+        # Print the message
+        stamp = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
+        sendMessage = f'[{stamp}] {commandObject["username"]}: {commandObject["message"]}'
+        print(sendMessage)
+
+        # Return 401
+        self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 401}), 'utf-8'), client)
+        return
 
     def register(self, client, username: str):
         if username == None:
@@ -76,16 +97,20 @@ class ChatServer:
         else:
             self.clients[username] = client
             self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 401}), 'utf-8'), client)
-            self.broadcast("Server", "{} has joined the chat".format(username))
-            self.broadcast("Server", self.getUserListString())
+            #self.broadcast("Server", "{} has joined the chat".format(username))
+            #self.broadcast("Server", self.getUserListString())
+            print("{} has joined the chat".format(username))
+            print(self.getUserListString())
             return
 
     def unregister(self, client, username: str):
         if username in self.clients.keys():
             del self.clients[username]
             self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 401}), 'utf-8'), client)
-            self.broadcast("Server", "{} has left the chat".format(username))
-            self.broadcast("Server", self.getUserListString())
+            print("{} has left the chat".format(username))
+            print(self.getUserListString())
+            #self.broadcast("Server", "{} has left the chat".format(username))
+            #self.broadcast("Server", self.getUserListString())
         else:
             self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 501}), 'utf-8'), client)
 
