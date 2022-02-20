@@ -123,6 +123,8 @@ def inputGrabber():
             break
         elif i == "users" or i == "list":
             print(serverInstance.getUserListString())
+        elif i == "numthreads":
+            print(active_count())
 
 def main():
     global serverInstance
