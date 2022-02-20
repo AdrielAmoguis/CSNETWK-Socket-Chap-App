@@ -132,7 +132,7 @@ def main():
 
     Thread(target=inputGrabber).start()
 
-    serverInstance = ChatServer(sys.argv[0], sys.argv[1])
+    serverInstance = ChatServer(sys.argv[1], sys.argv[2])
     serverInstance.start(callback=lambda host, port: print("Server started on {}:{}".format(host, port)))
 
 
