@@ -55,7 +55,8 @@ class ChatServer:
         command = commandObject['command']
         if command == 'register':
             self.register(client, commandObject['username'])
-
+            return 
+        
         # Check if registered
         if not self.checkRegistered(commandObject['username']):
             self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 501}), 'utf-8'), client)
@@ -78,6 +79,11 @@ class ChatServer:
             return False
 
     def handleMsg(self, client, commandObject: dict):
+        # Return a 201 for a blank message or null message parameter
+        if commandObject["message"] == None or len(commandObject["message"]) == 0:
+            self.server.sendto(bytes(json.dumps({'command':'ret_code', 'code_no': 201}), 'utf-8'), client)
+            return
+        
         # Print the message
         stamp = datetime.now().strftime("%m/%d/%Y, %H:%M:%S")
         sendMessage = f'[{stamp}] {commandObject["username"]}: {commandObject["message"]}'
@@ -126,6 +132,10 @@ class ChatServer:
         userList += " ]"
         return userList
 
+    def kickUser(self, username):
+        print("Kicking user: {}".format(username))
+        del self.clients[username]
+
     def stop(self):
         self.runThread = False
         self.server.close()
@@ -141,14 +151,23 @@ def signal_handler(signal, frame):
 def inputGrabber():
     global serverInstance
     while True:
-        i = input()
+        try:
+            i = input()
+        except EOFError:
+            break
+        
         if i == "stop":
             serverInstance.stop()
             break
+        
         elif i == "users" or i == "list":
             print(serverInstance.getUserListString())
         elif i == "numthreads":
             print(active_count())
+        elif i.startswith("kick"):
+            userToKick = i.split(" ")[1]
+            serverInstance.kickUser(userToKick)
+
 
 def main():
     global serverInstance

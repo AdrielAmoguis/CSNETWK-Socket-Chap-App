@@ -4,7 +4,6 @@
 #   - Lorenzo S. Querol
 
 import socket
-import threading
 from datetime import datetime
 import json
 import sys
@@ -27,20 +26,43 @@ command = json.dumps(command)
 sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 addr = (address, int(port))
 
-# SEND TO SERVER
-message = sock.sendto(bytes(command,"utf-8"), addr)
+sock.sendto(bytes(command, "utf-8"), addr)
+response, _ = sock.recvfrom(1024)
+responseData = json.loads(response)
+if responseData["code_no"] == 502:
+    print("User account already exists in chat room!")
+    print("Unsuccessful registration. Exiting...")
+    runThreads = False
 
-# RECEIVE MESSAGES FROM SERVER
-def receiveMessages():
+def runMainThread():
     global runThreads
-    global command
-    
     while runThreads:
         try:
+            # SEND A MESSAGE
+            message = input("Enter a message: ")
+
+            # JSON COMMAND FOR DEREGISTERING
+            if message == "~leave" or message == "~quit" or message == "~exit":
+                command = { "command": "deregister", "username": username }
+            
+            # JSON COMMAND FOR LIST OF USERS
+            elif message == "~list" or message == "~users":
+                command = { "command": "list" }
+                
+            # JSON COMMAND FOR REGULAR MESSAGE
+            else:
+                command = { "command": "msg", "username": username, "message": message }
+
+            # Send data through the socket
+            command = json.dumps(command)
+            sock.sendto(bytes(command, "utf-8"), addr)
+                
             # RECEIVE DATA FROM SERVER
             data, server = sock.recvfrom(1024)
+
             # PARSE DATA INTO DICTIONARY
             data = json.loads(data.decode("utf-8")) 
+            
             if data['command'] == "ret_code":
                 code_no = data['code_no']
                 
@@ -61,67 +83,15 @@ def receiveMessages():
                         print("Disconnecting")
                         runThreads = False
                         sock.close()
+                        return
                         
                 elif code_no == 501: # USER NOT REGISTERED
                     print("User not registered")
-                    
-                elif code_no == 502: # USER ACCOUNT EXISTS
-                    runThreads = False
-                    sock.close()
-                    print("User account already exists in chat room!")
-                    print("Unsuccessful registration. Exiting..")
-                    
+        
             elif data['command'] == 'msg':
                 print(data['message'])
             
         except Exception as e:
             print('ERROR OCCURRED: {}'.format(e))
-
-# SEND MESSAGES FROM SERVER
-def sendMessages():
-    global runThreads
-    global command
-    
-    while runThreads:
-        # LISTEN FOR INPUT
-        try:
-            message = input("Enter message: ")
-        except EOFError:
-            continue
-        
-        # JSON COMMAND FOR DEREGISTERING
-        if message == "~leave" or message == "~quit" or message == "~exit":
-            command = { "command": "deregister", "username": username }
-            command = json.dumps(command)
-            sock.sendto(bytes(command, "utf-8"), addr)
-            return 
-        
-        elif message == "~list" or message == "~users":
-            command = { "command": "list" }
-            command = json.dumps(command)
-            sock.sendto(bytes(command, "utf-8"), addr)
             
-        # JSON COMMAND FOR REGULAR MESSAGE
-        else:
-            command = { "command": "msg", "username": username, "message": message }
-            
-            
-        # STRINGIFY JSON
-        command = json.dumps(command) 
-        # SEND COMMAND TO SERVER
-        sock.sendto(bytes(command, "utf-8"), addr)
-        
-RECV_THREAD = threading.Thread(target=receiveMessages)
-RECV_THREAD.start()
-
-SEND_THREAD = threading.Thread(target=sendMessages)
-SEND_THREAD.start()
-
-def signal_handler(signal, frame):
-    print("\nKeyboardInterrupt Signal Detected. Shutting down.")
-    global runThreads
-    sock.sendto(bytes(json.dumps({"command": "deregister", "username": username}),"utf-8"), addr)
-    runThreads = False
-    sock.close()
-
-signal.signal(signal.SIGINT, signal_handler)
+runMainThread()                
