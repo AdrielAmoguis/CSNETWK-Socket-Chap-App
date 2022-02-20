@@ -70,13 +70,23 @@ class ChatServer:
     def clientHandler(self, client):
         # Wait for client messages
         while True:
-            clientMessage = client.recv(1024)
-
-    def handleMessage(self, client, message):
-        pass
+            # Parse message
+            clientMessage = client.recv(self.bufferSize)
+            
+            # Handle Message
+            self.commandHandler(client, clientMessage)
 
     def commandHandler(self, client, command):
-        pass
+        # Parse json
+        parsedJSON = json.loads(command.decode("utf-8"))
+
+        # Command Switch
+        if parsedJSON["command"] == "register":
+            pass
+        elif parsedJSON["command"] == "deregister":
+            pass
+        else:
+            pass
 
     def broadcastHandler(self, message):
         # Broadcast the message to all clients
